@@ -1,0 +1,4 @@
+This Perl script allows you to create a new Snapshot for a HostEurope VServer.
+It uses the HTML Page at kis.hosteurope.de
+
+It's useful to create periodically new snapshots of your server.
