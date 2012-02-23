@@ -7,7 +7,6 @@ use warnings;
 use File::Basename;
 use Cwd 'abs_path';
 use Getopt::Long;
-
 use Term::ANSIColor;
 use XML::Simple;
 use WWW::Mechanize;

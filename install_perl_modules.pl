@@ -23,6 +23,12 @@ my @requiredModules = (
 	"abs_path",
 	"Getopt::Long",
 	"Term::ReadKey",
+	"Term::ANSIColor",
+	"XML::Simple",
+	"WWW::Mechanize",
+	"HTTP::Request::Common",
+	"HTML::TreeBuilder",
+	"URI::Escape",
 );
 
 if($windows){
