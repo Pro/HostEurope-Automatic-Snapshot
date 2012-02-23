@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<heconfig>
+  <!-- This is your kis.hosteurope.de account number and password used for logging in -->
+  <account_name>123456789</account_name>
+  <account_password>mypassword</account_password>
+  
+  <!-- Add a <vps> tag for each Virtual Private Server -->
+  <vps>
+    <!-- ID of the VPS. Its in brackets of the Package name -->
+    <vps_id>123456</vps_id>
+    <!-- Only make snapshot if available is bigger or equal to this value. Useful if you want to keep some slots free -->
+    <min_available>0</min_available>
+    <!-- Deletion stategy for deleting old snapshots if no more free slots. Use "newest", "oldest" or "NAME" where NAME is the NAME of the snapshot to delete. Keep in mind that this may delete also you manually created snapshots -->
+    <deletion_stategy>Automatic Snapshot</deletion_stategy>
+    <!-- Description of the snapshot -->
+    <snapshot_description>Automatic Snapshot</snapshot_description>
+	
+  </vps>
+</heconfig>
