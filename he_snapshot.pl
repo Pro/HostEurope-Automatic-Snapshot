@@ -97,7 +97,7 @@ sub VPSSnapshot
 		DeleteSnapshot($snap_div, $vps_id, $vps->{"deletion_stategy"});
 	}
 	
-	#CreateSnapshot($vps_id, $vps->{"snapshot_description"});
+	CreateSnapshot($vps_id, $vps->{"snapshot_description"});
 }
 
 sub SnapshotInfo
