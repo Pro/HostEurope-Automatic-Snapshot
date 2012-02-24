@@ -14,6 +14,8 @@ use HTTP::Request::Common qw(POST);
 use HTML::TreeBuilder;
 use URI::Escape;
 
+use Time::Local;
+
 use Data::Dumper;
 
 my $windows = $^O =~ /Win32/i;
@@ -34,6 +36,8 @@ my $server_url = "https://kis.hosteurope.de";
 my $admin_url = "/administration/";
 my $backup_url = "/administration/vps/admin.php?menu=3&mode=backup&vps_id=";
 my $backup_new_url = "/administration/vps/admin.php?menu=3&mode=backup&submode=new_backup2&vps_id=";
+my $backup_renew_url = "/administration/vps/admin.php?menu=3&mode=backup&submode=Erneuern&vps_id=";
+my $backup_delete_url = "/administration/vps/admin.php?menu=3&mode=backup&submode=Loeschen&vps_id=";
 
 require $mypath.'/utils.pl';
 
@@ -91,12 +95,16 @@ sub VPSSnapshot
 	}
 		
 	my $snap_remain = SnapshotRemain($snap_div, $vps_id);
+	
+	my $renew_id = undef;
+		
 	if ($snap_remain <= $vps->{"min_available"})
 	{
-		DeleteSnapshot($snap_div, $vps_id, $vps->{"deletion_stategy"});
+		my(@snap_list) = SnapshotList($snap_div);
+		$renew_id = DeleteSnapshot($snap_div, $vps_id, $vps->{"deletion_stategy"}, @snap_list);
 	}
 	
-	CreateSnapshot($vps_id, $vps->{"snapshot_description"});
+	CreateSnapshot($vps_id, $vps->{"snapshot_description"},$renew_id);
 }
 
 sub SnapshotInfo
@@ -105,6 +113,8 @@ sub SnapshotInfo
 	my $res = $mech->get($server_url.$backup_url.$vps_id);
 	if ($res->is_success) {
 		my $string = $res->decoded_content();
+		#SaveHtmlResponse($res,"creating.html");
+		#my $string = LoadHtmlResponse("creating.html");
 		return GetSnapshotInfoDiv($string);
 	} else {
 		printfvc(1, "Couldn't get snapshot info for VPS $vps_id. Server returned: " . $res->as_string, 'red');
@@ -156,7 +166,7 @@ sub SnapshotStatus
 			if ($1 eq "Backup anlegen")
 			{
 				my $percentage = 0;
-				if ($progress->as_text() =~ m/Aktueller Status: Zu (\d+)% fertiggestellt/)
+				if (defined($progress) && $progress ne " " && $progress->as_text() =~ m/Aktueller Status: Zu (\d+)% fertiggestellt/)
 				{
 					$percentage = $1;
 				}
@@ -188,7 +198,7 @@ sub SnapshotRemain
 {
 	my $snap_div = shift;
 	my $vps_id = shift;
-	return eval {
+	my $ret = eval {
 		my $p_tag = $snap_div->look_down(
 			'_tag', 'p',
 			sub {
@@ -204,7 +214,90 @@ sub SnapshotRemain
 	if ($@){
 		printfvc(1, "Snapshot count not found. Maybe page HTML code has changed. Try to update your script.", 'red');
 		return undef;
-    };
+    } else {
+		return $ret;
+	}
+}
+
+sub SnapshotList
+{
+	my $snap_div = shift;
+	my @ret = eval {
+		my $table_tag = $snap_div->look_down(
+			'_tag', 'table',
+			'border', '0',
+			'cellpadding', '0',
+			'cellspacing', '0',
+		)->look_down(
+			'_tag', 'tbody',
+			);
+		my $rowAddr = 0;
+		
+		my @ret = ();
+		while (defined($table_tag->address(".$rowAddr")))
+		{
+		
+			if ($table_tag->address(".$rowAddr") eq " ")
+			{
+				last;
+			}
+			
+			my %list_entry = ();
+			my $row = $table_tag->address(".$rowAddr");
+			
+			
+			my $time_size = $row->address(".0")->as_text(); #31.01.2012 um 10:43 Uhr Größe: 46.65 GiB
+			my ($s_day, $s_mon, $s_year, $s_hour, $s_min, $s_size, $s_unit) = $time_size =~ m/(\d{2})\.(\d{2})\.(\d{4}) um (\d{2}):(\d{2}) Uhr Größe: ([\d.]+) (T|G|M|K)iB/;
+			
+			$list_entry{"time"}=timelocal(0, $s_min, $s_hour, $s_day, $s_mon-1, $s_year-2000);
+			$list_entry{"size"}=$s_size;#Will kontain size in KiB
+			if ($s_unit eq "T")
+			{
+				$list_entry{"size"} *= 1024*1024*1024;
+			} elsif ($s_unit eq "G")
+			{
+				$list_entry{"size"} *= 1024*1024;
+			} elsif ($s_unit eq "M")
+			{
+				$list_entry{"size"} *= 1024;
+			}
+						
+			$list_entry{"name"} = $row->address(".1")->as_text(); #Name as text
+			
+			my $type = $row->address(".2")->look_down(
+				'_tag', 'option',
+				sub {
+					$_[0]->attr('selected')
+				}
+			);
+			if (defined($type))
+			{
+				$list_entry{"type"} = $type->as_text();
+			} else {
+				$list_entry{"type"} = $row->address(".2")->as_text();
+			} #Snapshot Backup (1/2)
+			
+			if (defined($row->address(".3")) && $row->address(".3") ne ' ')
+			{
+				$list_entry{"backup_id"} = $row->address(".3")->look_down(
+					'_tag', 'input',
+					sub {
+						$_[0]->attr('name') eq "backup[id]"
+					}
+				)->attr('value'); #ad33d381-1d67-6c4b-a120-302c183c0259/20120131094340
+			}
+			
+			push(@ret,\%list_entry);			
+			$rowAddr += 1;
+		}
+		return @ret;
+	};
+	if ($@){
+		printfvc(1, "Snapshot List couln't be parsed. Maybe page HTML code has changed. Try to update your script.", 'red');
+		return undef;
+    } else {
+		return @ret;
+	}
 }
 
 sub DeleteSnapshot
@@ -212,21 +305,99 @@ sub DeleteSnapshot
 	my $snap_div = shift;
 	my $vps_id = shift;
 	my $deletion_strategy = shift;
+	my @snap_list = shift;
 	
-	#TODO
+	my $backup_id = undef;
+	my $cmp_timestamp = undef;
+	my $renew = 0;
 	
-	return 1;
+	foreach my $snap_entry (@snap_list)
+	{
+		if (!defined($snap_entry->{"backup_id"}))
+		{
+			printfvc(3, "Deletion: Skipping " . $snap_entry->{"name"} . " because it has no id.");
+			next;
+		}
+		if ($deletion_strategy eq "newest")
+		{
+			if (!defined($cmp_timestamp) || $snap_entry->{"time"}>$cmp_timestamp)
+			{
+				$backup_id = $snap_entry->{"backup_id"};
+				$cmp_timestamp = $snap_entry->{"time"};
+			}
+		} elsif ($deletion_strategy eq "oldest")
+		{
+			if (!defined($cmp_timestamp) || $snap_entry->{"time"}<$cmp_timestamp)
+			{
+				$backup_id = $snap_entry->{"backup_id"};
+				$cmp_timestamp = $snap_entry->{"time"};
+			}
+		} else {
+			if ($snap_entry->{"name"} eq $deletion_strategy)
+			{
+				$backup_id = $snap_entry->{"backup_id"};
+				$renew = 1;
+				last;
+			}
+		}
+	}
+	
+	if (!defined($backup_id))
+	{
+		printfvc(1, "Couldn't delete Snapshot. None found for deletion strategy: $deletion_strategy", 'red');
+		return undef;
+	}
+	
+	if ($renew)
+	{
+		printfvc(3, "Renewing Snapshot with id: $backup_id",'green');
+		return $backup_id;
+	}
+	printfvc(3, "Deleting Snapshot with id: $backup_id",'green');
+	
+	my $res = $mech->get($server_url.$backup_delete_url.$vps_id."&backup%5Bid%5D=".$backup_id);
+	if ($res->is_success) {
+		my $string = $res->decoded_content();
+		
+		my $snap_div = GetSnapshotInfoDiv($string);	
+		if (!defined($snap_div))
+		{
+			return -1;
+		}
+		my(%snap_status) = SnapshotStatus($snap_div, $vps_id);
+		if ($snap_status{status} != 2)
+		{
+			printfvc(1, "Couldn't delete snapshot for VPS $vps_id. Status isn't as expected. Current status: " . $snap_status{text}, 'red');
+			return -1;
+		}
+		return 1;
+	} else {
+		printfvc(1, "Couldn't delete snapshot for VPS $vps_id. Server returned: " . $res->as_string, 'red');
+		return -1;
+	}
+	
+	return undef;
 }
 
 sub CreateSnapshot
 {
-	my $snap_div = shift;
 	my $vps_id = shift;
 	my $snap_name = shift;
+	my $renew_id = shift;
 	
-	my $res = $mech->get($server_url.$backup_new_url.$vps_id."&backup%5Bmessage%5D=".uri_escape($snap_name)."&backup%5Bnew_type%5D=12+weeks");
+	my $url = "";
+	if (defined($renew_id))
+	{
+		$url = $server_url.$backup_new_url.$vps_id."&backup%5Bid%5D=".$renew_id;
+	}
+	else
+	{
+		$url = $server_url.$backup_new_url.$vps_id."&backup%5Bmessage%5D=".uri_escape($snap_name)."&backup%5Bnew_type%5D=12+weeks";
+	}
+	
+	my $res = $mech->get($url);
 	if ($res->is_success) {
-		my $string = LoadHtmlResponse("Backup submit.htm");#$res->decoded_content();
+		my $string = $res->decoded_content();
 		
 		my $snap_div = GetSnapshotInfoDiv($string);	
 		if (!defined($snap_div))
@@ -258,7 +429,8 @@ sub LoadHtmlResponse
 sub SaveHtmlResponse
 {
 	my $res = shift;
-	open(MYOUTFILE, ">out.html");
+	my $name = shift;
+	open(MYOUTFILE, ">$name");
 	print MYOUTFILE $res->decoded_content();
 	close MYOUTFILE;
 }
@@ -290,6 +462,7 @@ sub processCommandLine
   $options{"config"} = "";
   $options{"pid"} = "";
   $options{"no-color"} = 0;
+  $options{"override"} = 0;
   
   my @flags = (
     "v|verbose", 
